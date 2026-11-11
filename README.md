@@ -36,7 +36,7 @@ Open http://localhost:5173.
 ## Test flow
 
 1. Use manual Session ID `DEMO-1001` (or use the ZXing camera scanner with a barcode containing that text).
-2. Review the cart total (₱34.00) and continue.
+2. Review the items subtotal (₱34.00) plus the fixed parking fee (₱20.00); total due is ₱54.00 and continue.
 3. Select simulated QR or NFC.
 4. For QR, scan the displayed code or click **Approve on this device**. The phone-friendly mock URL is served by the backend.
 5. For NFC, enter any four digits and detect the simulated NFC tag.
@@ -76,7 +76,7 @@ The QR option follows the Lab 4 simulated-payment workflow while using the Check
 4. The React payment screen polls `/api/payments/{token}` and advances to the existing receipt/history flow after success.
 5. Repeated confirmations return HTTP `409`, and reusing the same payment token is idempotent.
 
-The backend accepts the QR provider aliases `method` and `transaction_id` alongside the Checkout-Counter fields. Cart/session validation remains authoritative, so the payment amount must match the loaded cart total.
+The backend accepts the QR provider aliases `method` and `transaction_id` alongside the Checkout-Counter fields. Cart/session validation remains authoritative, so the payment amount must match the loaded cart total, including the fixed ₱20.00 parking fee.
 
 
 ## Physical ESP32 + RC522 NFC setup

@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
-from .service import get_fixture_cart
+from .service import PARKING_FEE, get_fixture_cart
 
 app = FastAPI(title='Checkout Counter Demo API')
 app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_methods=['*'], allow_headers=['*'])
@@ -215,10 +215,14 @@ def cart_or_404(session_id: str):
     clean_id = session_id.strip()
     fixture = get_fixture_cart(clean_id)
     if fixture is not None:
-        return fixture
-    if clean_id.upper() not in CARTS:
-        raise HTTPException(404, 'Cart session not found. Try DEMO-1001 or SHOP-20260928-0007.')
-    return CARTS[clean_id.upper()]
+        cart = fixture
+    else:
+        if clean_id.upper() not in CARTS:
+            raise HTTPException(404, 'Cart session not found. Try DEMO-1001 or SHOP-20260928-0007.')
+        cart = CARTS[clean_id.upper()]
+
+    subtotal = round(float(cart.get('subtotal', cart['total'])), 2)
+    return {**cart, 'subtotal': subtotal, 'parking_fee': PARKING_FEE, 'total': round(subtotal + PARKING_FEE, 2)}
 
 
 class PaymentRequest(BaseModel):
@@ -409,7 +413,8 @@ def finish(token: str, state: str):
         cart = cart_or_404(payment['session_id'])
         transaction = {
             'transaction_id': payment['transaction_id'], 'cart_id': cart['cart_id'],
-            'session_id': cart['session_id'], 'amount': payment['amount'],
+            'session_id': cart['session_id'], 'subtotal': cart['subtotal'],
+            'parking_fee': cart['parking_fee'], 'amount': payment['amount'],
             'payment_method': payment['method'], 'timestamp': now(),
             'payment_status': 'successful', 'items': cart['items'],
             'payment_id': payment['payment_id'], 'simulation_reference': payment['simulation_reference'],
@@ -485,7 +490,7 @@ def phone_page(token: str):
         raise HTTPException(404, 'Payment token not found')
     return HTMLResponse(f'''<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Demo QR Payment</title>
 <style>body{{font-family:Arial,sans-serif;max-width:460px;margin:30px auto;padding:20px;background:#f5f7fa;color:#153b5b}}.card{{background:#fff;padding:26px;border-radius:18px;box-shadow:0 8px 24px #193b5b1a}}button{{width:100%;padding:15px;margin-top:12px;border:0;border-radius:10px;font-size:16px;font-weight:bold;cursor:pointer}}.ok{{background:#153b5b;color:#fff}}.bad{{background:#fff0ee;color:#ae3028}}.demo{{background:#fff3dd;border:1px solid #f3d394;border-radius:10px;padding:12px;font-size:13px}}#out{{white-space:pre-wrap;text-align:center;font-weight:bold}}</style>
-<div class="card"><h1>Demo QR Payment</h1><div class="demo"><b>SIMULATION ONLY</b><br>No real money is processed.</div><p>Transaction: <b>{payment['transaction_id']}</b></p><p>Amount: <b>₱{payment['amount']:.2f} DEMO</b></p><button class="ok" onclick="confirmPayment('DEMO-APPROVE')">Approve simulated payment</button><button class="bad" onclick="confirmPayment('DEMO-DECLINE')">Decline simulated payment</button><p id="out"></p></div>
+<div class="card"><h1>Demo QR Payment</h1><div class="demo"><b>SIMULATION ONLY</b><br>No real money is processed.</div><p>Transaction: <b>{payment['transaction_id']}</b></p><p>Amount: <b>₱{payment['amount']:.2f} DEMO</b></p><p>Includes fixed parking fee: ₱{PARKING_FEE:.2f}</p><button class="ok" onclick="confirmPayment('DEMO-APPROVE')">Approve simulated payment</button><button class="bad" onclick="confirmPayment('DEMO-DECLINE')">Decline simulated payment</button><p id="out"></p></div>
 <script>async function confirmPayment(value){{document.querySelectorAll('button').forEach(b=>b.disabled=true);const r=await fetch('/api/payments/{token}/confirm',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{confirmation:value}})}});const d=await r.json();if(r.ok&&d.status==='successful'){{document.getElementById('out').textContent='PAYMENT APPROVED — opening receipt…';setTimeout(()=>window.location.href='/receipt/{token}',650);}}else{{document.getElementById('out').textContent=r.status===409?'DUPLICATE: this payment was already confirmed':(r.ok?'PAYMENT DECLINED':((d.detail&&d.detail.detail)||'Payment already confirmed'));}}}}</script>''')
 
 
@@ -500,7 +505,7 @@ def receipt_page(token: str):
     timestamp = confirmed['timestamp'].isoformat() if confirmed else now().isoformat()
     return HTMLResponse(f'''<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment Sent | Checkout Counter</title>
 <style>body{{font-family:Arial,sans-serif;max-width:560px;margin:42px auto;padding:18px;background:#eef8f2}}.card{{background:#fff;border-radius:22px;padding:30px;box-shadow:0 10px 30px #165c3518;text-align:center}}.check{{font-size:44px;color:#13795b}}.sent{{color:#13795b;font-size:30px;font-weight:bold}}.row{{display:flex;justify-content:space-between;gap:20px;padding:14px 0;border-bottom:1px solid #e3ebe6;text-align:left}}.label{{color:#687786}}.value{{font-weight:bold;text-align:right;overflow-wrap:anywhere}}.warning{{margin-top:22px;background:#fff7df;border:1px solid #f3d394;border-radius:10px;padding:12px;text-align:left;font-size:13px}}</style>
-<div class="card"><div class="check">✓</div><h1 class="sent">PAYMENT SENT</h1><p>Demo payment approved successfully</p><h2>₱{payment['amount']:.2f} DEMO</h2><div class="row"><span class="label">Date and time</span><b class="value">{timestamp}</b></div><div class="row"><span class="label">Payment method</span><b class="value">QR</b></div><div class="row"><span class="label">Transaction ID</span><b class="value">{payment['transaction_id']}</b></div><div class="row"><span class="label">Payment ID</span><b class="value">{payment['payment_id']}</b></div><div class="row"><span class="label">Reference number</span><b class="value">{payment['simulation_reference']}</b></div><div class="warning"><b>SIMULATION ONLY</b><br>No real money was sent.</div></div>''')
+<div class="card"><div class="check">✓</div><h1 class="sent">PAYMENT SENT</h1><p>Demo payment approved successfully</p><h2>₱{payment['amount']:.2f} DEMO</h2><div class="row"><span class="label">Date and time</span><b class="value">{timestamp}</b></div><div class="row"><span class="label">Parking fee</span><b class="value">₱{PARKING_FEE:.2f}</b></div><div class="row"><span class="label">Payment method</span><b class="value">QR</b></div><div class="row"><span class="label">Transaction ID</span><b class="value">{payment['transaction_id']}</b></div><div class="row"><span class="label">Payment ID</span><b class="value">{payment['payment_id']}</b></div><div class="row"><span class="label">Reference number</span><b class="value">{payment['simulation_reference']}</b></div><div class="warning"><b>SIMULATION ONLY</b><br>No real money was sent.</div></div>''')
 
 
 @app.post('/api/reset')
